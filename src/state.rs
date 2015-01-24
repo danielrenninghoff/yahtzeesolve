@@ -69,7 +69,7 @@ pub fn new_state(state: &State, roll: &[u8;6], cat: usize) -> State {
 fn upper_score(roll: &[u8;6], cat: usize) -> u8 {
     match cat {
         0 ... 5 => {
-            return roll[cat] * cat as u8;
+            return roll[cat] * (cat + 1) as u8;
         }
         _ => {
             return 0;
