@@ -1,19 +1,26 @@
+#![feature(core)]
+#![feature(env)]
+#![feature(io)]
+#![feature(path)]
+#![feature(std_misc)]
+
 use std::collections::BTreeMap;
-use std::num::Float;
 use std::iter::AdditiveIterator;
 use std::sync::TaskPool;
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::io::File;
-use std::io::BufferedWriter;
-use std::io::BufferedReader;
-use std::io;
-use std::os;
+use std::old_io::File;
+use std::old_io::BufferedWriter;
+use std::old_io::BufferedReader;
+use std::old_io::stdio;
+use std::env;
+use std::old_io::IoResult;
 
 mod state;
 
 
-fn generate_dice_rolls(rolls: &mut Vec<[u8; 6]>) {
+fn generate_dice_rolls() -> Vec<[u8; 6]> {
+    let mut rolls = vec![];
     for ones in 0..6u8 {
         for twos in 0..6u8 {
             for threes in 0..6u8 {
@@ -29,9 +36,11 @@ fn generate_dice_rolls(rolls: &mut Vec<[u8; 6]>) {
             }
         }
     }
+    rolls
 }
 
-fn generate_dice_keeps(rolls: &mut Vec<[u8; 6]>) {
+fn generate_dice_keeps() -> Vec<[u8; 6]> {
+    let mut keeps = vec![];
     for ones in 0..6u8 {
         for twos in 0..6u8 {
             for threes in 0..6u8 {
@@ -39,7 +48,7 @@ fn generate_dice_keeps(rolls: &mut Vec<[u8; 6]>) {
                     for fives in 0..6u8 {
                         for sixes in 0..6u8 {
                             if (ones+twos+threes+fours+fives+sixes) <= 5 {
-                                rolls.push([ones,twos,threes,fours,fives,sixes]);
+                                keeps.push([ones,twos,threes,fours,fives,sixes]);
                             }
                         }
                     }
@@ -47,23 +56,21 @@ fn generate_dice_keeps(rolls: &mut Vec<[u8; 6]>) {
             }
         }
     }
+    keeps
 }
 
 fn main() {
-    let mut x: BTreeMap<state::State, f64> = BTreeMap::new();
-
-    let args = os::args();
-    match args.as_slice() {
+    let args: Vec<String> = env::args().collect();
+    match &args[] {
         [ref name] => {
             println!("USAGE: {} [generate|play]", name);
         },
         [_, ref one] => {
-            match one.as_slice() {
+            match &one[] {
                 "generate" => {
-                    let mut rollvec = vec![];
-                    generate_dice_rolls(&mut rollvec);
-                    let mut dicekeeps = vec![];
-                    generate_dice_keeps(&mut dicekeeps);
+                    let mut x: BTreeMap<state::State, f64> = BTreeMap::new();
+                    let rollvec = generate_dice_rolls();
+                    let dicekeeps = generate_dice_keeps();
                     let rolls = Arc::new(rollvec);
                     let keeps = Arc::new(dicekeeps);
                     let mut start = state::State{ fields: [true;13], upper: 63 };
@@ -94,30 +101,15 @@ fn main() {
                             x.insert(e,e2);
                         }
                     }
-                    let file = File::create(&Path::new("probs.dat")).unwrap();
-                    let mut writer = BufferedWriter::new(file);
-                    for (st, f) in x.iter() {
-                        for e in st.fields.iter() {
-                            if *e {
-                                writer.write_u8(1);
-                            }
-                            else {
-                                writer.write_u8(0);
-                            }
-                        }
-                        writer.write_u8(st.upper);
-                        writer.write_le_f64(*f);
-                    }
+                    write_state_file(&x).unwrap();
                 },
                 "play" => {
-                    let mut rollvec = vec![];
-                    generate_dice_rolls(&mut rollvec);
-                    let mut dicekeeps = vec![];
-                    generate_dice_keeps(&mut dicekeeps);
-                    readStateFile(&mut x);
+                    let rollvec = generate_dice_rolls();
+                    let dicekeeps = generate_dice_keeps();
+                    let x = read_state_file().unwrap();
                     let mut state = state::State{ fields: [false;13], upper: 0 };
-                    for i in 0..13 {
-                        state = calc_round(&mut state, &x, &rollvec, &dicekeeps);
+                    for _ in 0..13 {
+                        state = calc_round(&state, &x, &rollvec, &dicekeeps);
                     }
                 }
                 _ => {
@@ -132,12 +124,31 @@ fn main() {
     }
 }
 
-fn readStateFile(map: &mut BTreeMap<state::State, f64>) {
-    let file = File::open(&Path::new("probs.dat")).unwrap();
+fn write_state_file(map: &BTreeMap<state::State, f64>) -> IoResult<()> {
+    let file = try!(File::create(&Path::new("probs.dat")));
+    let mut writer = BufferedWriter::new(file);
+    for (st, f) in map {
+        for e in &st.fields {
+            if *e {
+                try!(writer.write_u8(1));
+            }
+            else {
+                try!(writer.write_u8(0));
+            }
+        }
+        try!(writer.write_u8(st.upper));
+        try!(writer.write_le_f64(*f));
+    }
+    Ok(())
+}
+
+fn read_state_file() -> IoResult<BTreeMap<state::State, f64>> {
+    let mut map: BTreeMap<state::State, f64> = BTreeMap::new();
+    let file = try!(File::open(&Path::new("probs.dat")));
     let mut reader = BufferedReader::new(file);
     let mut state = state::State{ fields: [true;13], upper: 63 };
-'bigloop: loop {
-        for i in 0..13 {
+    'bigloop: loop {
+        for i in 0..13us {
             match reader.read_u8() {
                 Ok(v) => {
                     if v == 0u8 {
@@ -152,47 +163,48 @@ fn readStateFile(map: &mut BTreeMap<state::State, f64>) {
                 }
             }
         }
-        state.upper = reader.read_u8().unwrap();
-        let prob = reader.read_le_f64().unwrap();
+        state.upper = try!(reader.read_u8());
+        let prob = try!(reader.read_le_f64());
         map.insert(state.clone(), prob);
     }
+    Ok(map)
 }
 
 fn calc_round(state: &state::State, lookup: &BTreeMap<state::State, f64>, rollvec: &Vec<[u8; 6]>, dicekeeps: &Vec<[u8; 6]>) -> state::State {
     let mut end_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
-    for roll in rollvec.iter() {
+    for roll in rollvec {
         let (tmp,_) = gen_end_prob(state, roll, lookup);
         end_states.insert(*roll, tmp);
     }
 
     let mut keep_2_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
-    for keep in dicekeeps.iter() {
+    for keep in dicekeeps {
         keep_2_states.insert(*keep, gen_keep_prob(keep, &end_states));
     }
 
     let mut roll_2_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
-    for roll in rollvec.iter() {
+    for roll in rollvec {
         let (tmp,_) = gen_roll_prob(roll,&[0,0,0,0,0,0], &keep_2_states);
         roll_2_states.insert(*roll, tmp);
     }
 
     let mut keep_1_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
-    for keep in dicekeeps.iter() {
+    for keep in dicekeeps {
         keep_1_states.insert(*keep, gen_keep_prob(keep, &roll_2_states));
     }
 
     println!("New Round. Please enter your next roll:");
-    let input: u32 = io::stdin().read_line().unwrap().trim().parse().unwrap();
+    let input: u32 = stdio::stdin().read_line().unwrap().trim().parse().unwrap();
     let inp1 = key_conv(input);
     let (_,kroll) = gen_roll_prob(&inp1,&[0,0,0,0,0,0], &keep_1_states);
     println!("{:?}", kroll);
     println!("Please enter your 2nd roll:");
-    let input2: u32 = io::stdin().read_line().unwrap().trim().parse().unwrap();
+    let input2: u32 = stdio::stdin().read_line().unwrap().trim().parse().unwrap();
     let roll2 = key_conv(input2);
     let (_,kroll) = gen_roll_prob(&roll2,&kroll, &keep_2_states);
     println!("{:?}", kroll);
     println!("Please enter your 3rd roll:");
-    let input2: u32 = io::stdin().read_line().unwrap().trim().parse().unwrap();
+    let input2: u32 = stdio::stdin().read_line().unwrap().trim().parse().unwrap();
     let mut roll2 = key_conv(input2);
     roll2[0] += kroll[0];
     roll2[1] += kroll[1];
@@ -247,7 +259,7 @@ fn calc_next(state: &mut state::State) -> bool {
         return true;
     }
 
-    for i in 0..13 {
+    for i in 0..13us {
         if (!state.fields[i]) && n3 == 1 {
             if i != 12 {
                 state.fields[i] = true;
@@ -256,13 +268,13 @@ fn calc_next(state: &mut state::State) -> bool {
             }
             else {
                 let mut n2 = 1;
-                for j in (0..12).rev() {
+                for j in (0..12us).rev() {
                     if !state.fields[j] && state.fields[j+1] {
                         state.fields[j] = true;
-                        for k in (0..n2+1) {
+                        for k in (0us..n2+1) {
                             state.fields[(12-k)] = true;
                         }
-                        for k in (0..n2+1) {
+                        for k in (0us..n2+1) {
                             state.fields[(j+1+k)] = false;
                         }
                         state.fields[j+1] = false;
@@ -273,7 +285,7 @@ fn calc_next(state: &mut state::State) -> bool {
                         n2 += 1;
                     }
                 }
-                for j in 0..13 {
+                for j in 0..13us {
                     if j <= n {
                         state.fields[j] = false;
                     }
@@ -302,36 +314,36 @@ fn gen_start_prob(state: &state::State, lookup: &BTreeMap<state::State, f64>, ro
     }
 
     let mut end_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
-    for roll in rollvec.iter() {
+    for roll in rollvec {
         let (tmp,_) = gen_end_prob(state, roll, lookup);
         end_states.insert(*roll, tmp);
     }
 
     let mut keep_2_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
-    for keep in dicekeeps.iter() {
+    for keep in dicekeeps {
         keep_2_states.insert(*keep, gen_keep_prob(keep, &end_states));
     }
 
     let mut roll_2_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
-    for roll in rollvec.iter() {
+    for roll in rollvec {
         let (tmp,_) = gen_roll_prob(roll,&[0,0,0,0,0,0], &keep_2_states);
         roll_2_states.insert(*roll, tmp);
     }
 
     let mut keep_1_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
-    for keep in dicekeeps.iter() {
+    for keep in dicekeeps {
         keep_1_states.insert(*keep, gen_keep_prob(keep, &roll_2_states));
     }
 
     let mut roll_1_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
-    for roll in rollvec.iter() {
+    for roll in rollvec {
         let (tmp,_) = gen_roll_prob(roll,&[0,0,0,0,0,0], &keep_1_states);
         roll_1_states.insert(*roll, tmp);
     }
 
     let mut sum = 0f64;
     let mut cnt = 0f64;
-    for roll in rollvec.iter() {
+    for roll in rollvec {
         sum += *roll_1_states.get(roll).expect("asd");
         cnt += 1f64;
     }
@@ -411,7 +423,7 @@ fn score(roll: &[u8;6], cat: usize) -> f64 {
         },
         6 => {
             if roll.iter().fold(false, |a, &b| a || (b >= 3)) {
-                return (0..6).map(|i| roll[i] * ((i as u8)+1)).sum() as f64;
+                return (0..6us).map(|i| roll[i] * ((i as u8)+1)).sum() as f64;
             }
             else {
                 return 0f64;
@@ -419,7 +431,7 @@ fn score(roll: &[u8;6], cat: usize) -> f64 {
         }
         7 => {
             if roll.iter().fold(false, |a, &b| a || (b >= 4)) {
-                return (0..6).map(|i| roll[i] * ((i as u8)+1)).sum() as f64;
+                return (0..6us).map(|i| roll[i] * ((i as u8)+1)).sum() as f64;
             }
             else {
                 return 0f64;
@@ -453,15 +465,15 @@ fn score(roll: &[u8;6], cat: usize) -> f64 {
             }
         }
         11 => {
-            return (0..6).map(|i| roll[i] * ((i as u8)+1)).sum() as f64;
-        }
-        12 => {
-            if roll.iter().fold(false, |a, &b| a || (b == 5)) {
+            if roll.contains(&5) {
                 return 50f64;
             }
             else {
                 return 0f64;
             }
+        }
+        12 => {
+            return (0..6us).map(|i| roll[i] * ((i as u8)+1)).sum() as f64;
         }
         _ => {
             return 0f64;

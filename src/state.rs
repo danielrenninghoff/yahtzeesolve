@@ -2,7 +2,7 @@ use std::cmp::Ordering::{Less, Equal, Greater};
 use std::cmp::Ordering;
 use std::cmp;
 
-#[derive(Clone,Eq,Show)]
+#[derive(Clone,Eq,Debug)]
 pub struct State {
     pub fields: [bool; 13],
     pub upper: u8,
@@ -10,7 +10,7 @@ pub struct State {
 
 impl PartialEq for State {
     fn eq(&self, other: &Self) -> bool {
-        for i in 0..13 {
+        for i in 0..13us {
             if self.fields[i] != other.fields[i] {
                 return false;
             }
@@ -21,7 +21,7 @@ impl PartialEq for State {
 
 impl PartialOrd for State {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        for i in 0..13 {
+        for i in 0..13us {
             if self.fields[i] && !other.fields[i] {
                 return Some(Less);
             }
@@ -41,7 +41,7 @@ impl PartialOrd for State {
 
 impl Ord for State {
     fn cmp(&self, other: &Self) -> Ordering {
-        for i in 0..13 {
+        for i in 0..13us {
             if self.fields[i] && !other.fields[i] {
                 return Less;
             }
