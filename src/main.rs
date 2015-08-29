@@ -28,26 +28,17 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#![feature(core)]
-#![feature(env)]
-#![feature(io)]
-#![feature(path)]
-#![feature(std_misc)]
+extern crate byteorder;
 
 use std::collections::BTreeMap;
-use std::iter::AdditiveIterator;
-use std::sync::TaskPool;
-use std::sync::mpsc;
-use std::sync::Arc;
-use std::old_io::File;
-use std::old_io::BufferedWriter;
-use std::old_io::BufferedReader;
-use std::old_io::stdio;
+use std::io;
+use std::io::BufReader;
+use std::io::BufWriter;
+use std::fs::File;
+use std::path::Path;
 use std::env;
-use std::old_io::IoResult;
-
-mod state;
-
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::cmp;
 
 fn generate_dice_rolls() -> Vec<[u8; 6]> {
     let mut rolls = vec![];
@@ -89,118 +80,77 @@ fn generate_dice_keeps() -> Vec<[u8; 6]> {
     keeps
 }
 
+pub fn upper_score(roll: &[u8;6], cat: usize) -> u8 {
+    match cat {
+        0 ... 5 => {
+            return roll[cat] * (cat + 1) as u8;
+        }
+        _ => {
+            return 0;
+        }
+    }
+}
+
+
 fn main() {
     let args: Vec<String> = env::args().collect();
-    match &args[] {
-        [ref name] => {
-            println!("USAGE: {} [generate|play]", name);
-        },
-        [_, ref one] => {
-            match &one[] {
+
+    match args.len() {
+        1 => {
+            println!("USAGE: {} [generate|play]", &args[0]);
+        }
+        2 => {
+            match &args[1][..] {
                 "generate" => {
-                    let mut x: BTreeMap<state::State, f64> = BTreeMap::new();
+                    let mut lookup = vec![0f64; 524288];
                     let rollvec = generate_dice_rolls();
                     let dicekeeps = generate_dice_keeps();
-                    let rolls = Arc::new(rollvec);
-                    let keeps = Arc::new(dicekeeps);
-                    let mut start = state::State{ fields: [true;13], upper: 63 };
-                    let pool = TaskPool::new(4);
-                    let (tx, rx) = mpsc::channel();
-                    for i in 0..14 {
-                        println!("Generating probabilities for {} empty fields...", i);
-                        let x2 = Arc::new(x.clone());
-                        let mut cnt = 0;
-                        loop {
-                            let tx = tx.clone();
-                            let start2 = start.clone();
-                            let x3 = x2.clone();
-                            let rolls2 = rolls.clone();
-                            let keeps2 = keeps.clone();
-                            pool.execute(move || {
-                                let tmp = gen_start_prob(&start2, &*x3, &*rolls2, &*keeps2);
-                                tx.send((start2,tmp)).unwrap();
-                            });
-                            cnt += 1;
-                            if calc_next(&mut start) {
-                                println!("{:?}",start);
-                                break;
-                            }
-                        }
-                        for _ in (0..cnt) {
-                            let (e,e2) = rx.recv().unwrap();
-                            x.insert(e,e2);
-                        }
+                    for i in (0..524288).rev() {
+                        let tmp = gen_start_prob(i, &lookup, &rollvec, &dicekeeps);
+                        lookup[i as usize] = tmp;
                     }
-                    write_state_file(&x).unwrap();
+                    write_state_file(&lookup).unwrap();
                 },
                 "play" => {
                     let rollvec = generate_dice_rolls();
                     let dicekeeps = generate_dice_keeps();
                     let x = read_state_file().unwrap();
-                    let mut state = state::State{ fields: [false;13], upper: 0 };
+                    let mut state: u32 = 0;
                     for _ in 0..13 {
-                        state = calc_round(&state, &x, &rollvec, &dicekeeps);
+                        state = calc_round(state, &x, &rollvec, &dicekeeps);
                     }
                 }
                 _ => {
 
                 }
             }
-
-        },
+        }
         _ => {
-            println!("USAGE: yahtzee [generate|play]");
+            println!("USAGE: {} [generate|play]", &args[0]);
         }
     }
 }
 
-fn write_state_file(map: &BTreeMap<state::State, f64>) -> IoResult<()> {
+fn write_state_file(lookup: &Vec<f64>) -> io::Result<()> {
     let file = try!(File::create(&Path::new("probs.dat")));
-    let mut writer = BufferedWriter::new(file);
-    for (st, f) in map {
-        for e in &st.fields {
-            if *e {
-                try!(writer.write_u8(1));
-            }
-            else {
-                try!(writer.write_u8(0));
-            }
-        }
-        try!(writer.write_u8(st.upper));
-        try!(writer.write_le_f64(*f));
+    let mut writer = BufWriter::new(file);
+    for i in 0..524288 {
+        try!(writer.write_f64::<LittleEndian>(lookup[i]));
     }
     Ok(())
 }
 
-fn read_state_file() -> IoResult<BTreeMap<state::State, f64>> {
-    let mut map: BTreeMap<state::State, f64> = BTreeMap::new();
+fn read_state_file() -> io::Result<Vec<f64>> {
+    let mut lookup = vec![0f64; 524288];
     let file = try!(File::open(&Path::new("probs.dat")));
-    let mut reader = BufferedReader::new(file);
-    let mut state = state::State{ fields: [true;13], upper: 63 };
-    'bigloop: loop {
-        for i in 0..13us {
-            match reader.read_u8() {
-                Ok(v) => {
-                    if v == 0u8 {
-                        state.fields[i] = false;
-                    }
-                    else {
-                        state.fields[i] = true;
-                    }
-                },
-                Err(_) => {
-                    break 'bigloop;
-                }
-            }
-        }
-        state.upper = try!(reader.read_u8());
-        let prob = try!(reader.read_le_f64());
-        map.insert(state.clone(), prob);
+    let mut reader = BufReader::new(file);
+    for i in 0..524288 {
+        lookup[i] = try!(reader.read_f64::<LittleEndian>());
     }
-    Ok(map)
+    Ok(lookup)
 }
 
-fn calc_round(state: &state::State, lookup: &BTreeMap<state::State, f64>, rollvec: &Vec<[u8; 6]>, dicekeeps: &Vec<[u8; 6]>) -> state::State {
+fn calc_round(state: u32, lookup: &Vec<f64>, rollvec: &Vec<[u8; 6]>, dicekeeps: &Vec<[u8; 6]>) -> u32 {
     let mut end_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
     for roll in rollvec {
         let (tmp,_) = gen_end_prob(state, roll, lookup);
@@ -224,17 +174,23 @@ fn calc_round(state: &state::State, lookup: &BTreeMap<state::State, f64>, rollve
     }
 
     println!("New Round. Please enter your next roll:");
-    let input: u32 = stdio::stdin().read_line().unwrap().trim().parse().unwrap();
+    let mut line = String::new();
+    io::stdin().read_line(&mut line).unwrap();
+    let input: u32 = line.trim().parse().unwrap();
     let inp1 = key_conv(input);
     let (_,kroll) = gen_roll_prob(&inp1,&[0,0,0,0,0,0], &keep_1_states);
     println!("{:?}", kroll);
     println!("Please enter your 2nd roll:");
-    let input2: u32 = stdio::stdin().read_line().unwrap().trim().parse().unwrap();
+    line = String::new();
+    io::stdin().read_line(&mut line).unwrap();
+    let input2: u32 = line.trim().parse().unwrap();
     let roll2 = key_conv(input2);
     let (_,kroll) = gen_roll_prob(&roll2,&kroll, &keep_2_states);
     println!("{:?}", kroll);
     println!("Please enter your 3rd roll:");
-    let input2: u32 = stdio::stdin().read_line().unwrap().trim().parse().unwrap();
+    line = String::new();
+    io::stdin().read_line(&mut line).unwrap();
+    let input2: u32 = line.trim().parse().unwrap();
     let mut roll2 = key_conv(input2);
     roll2[0] += kroll[0];
     roll2[1] += kroll[1];
@@ -246,7 +202,7 @@ fn calc_round(state: &state::State, lookup: &BTreeMap<state::State, f64>, rollve
     println!("Mark {}", choseni + 1);
     let scr = score(&roll2, choseni);
     println!("Score: {}", scr);
-    state::new_state(state, &roll2, choseni)
+    new_state(state, &roll2, choseni)
 }
 
 fn key_conv(input: u32) -> [u8;6] {
@@ -262,87 +218,12 @@ fn key_conv(input: u32) -> [u8;6] {
     out
 }
 
-fn calc_next(state: &mut state::State) -> bool {
-    match state.upper {
-        0 => state.upper = 63,
-        _ => {
-            state.upper -= 1;
-            return false;
-        }
+fn gen_start_prob(state: u32, lookup: &Vec<f64>, rollvec: &Vec<[u8; 6]>, dicekeeps: &Vec<[u8; 6]>) -> f64 {
+    if state == 0b111_1111_1111_1111_1111 {
+        return 35f64;
     }
-
-    let n = state.fields.iter().fold(0, |a, &b| {
-        if !b {
-            return a + 1;
-        }
-        else {
-            return a;
-        }
-    });
-
-    let mut n3 = n;
-
-    if n == 0 {
-        state.fields[0] = false;
-        return true;
-    }
-
-    if n == 13 {
-        return true;
-    }
-
-    for i in 0..13us {
-        if (!state.fields[i]) && n3 == 1 {
-            if i != 12 {
-                state.fields[i] = true;
-                state.fields[i+1] = false;
-                return false;
-            }
-            else {
-                let mut n2 = 1;
-                for j in (0..12us).rev() {
-                    if !state.fields[j] && state.fields[j+1] {
-                        state.fields[j] = true;
-                        for k in (0us..n2+1) {
-                            state.fields[(12-k)] = true;
-                        }
-                        for k in (0us..n2+1) {
-                            state.fields[(j+1+k)] = false;
-                        }
-                        state.fields[j+1] = false;
-                        //println!("asdasd7777 {:?}", state);
-                        return false;
-                    }
-                    else if !state.fields[j] {
-                        n2 += 1;
-                    }
-                }
-                for j in 0..13us {
-                    if j <= n {
-                        state.fields[j] = false;
-                    }
-                    else {
-                        state.fields[j] = true;
-                    }
-                }
-                //println!("asdasd999 {:?}", state);
-                return true;
-            }
-        }
-        else if !state.fields[i] {
-            n3 -= 1;
-        }
-    }
-    println!("ERROR SWASASASS");
-    return false;
-}
-
-fn gen_start_prob(state: &state::State, lookup: &BTreeMap<state::State, f64>, rollvec: &Vec<[u8; 6]>, dicekeeps: &Vec<[u8; 6]>) -> f64 {
-    if state.fields.iter().fold(true,|a, &b| a && b) {
-        match state.upper {
-            63 => return 35f64,
-            _  => return 0f64,
-        }
+    else if state > 0b111_1111_1111_1100_0000 {
+        return 0f64;
     }
 
     let mut end_states: BTreeMap<[u8; 6],f64> = BTreeMap::new();
@@ -386,14 +267,49 @@ fn gen_keep_prob(lroll: &[u8; 6], end_states: &BTreeMap<[u8; 6], f64>) -> f64 {
     let mut sum = 0f64;
     let mut cnt = 0f64;
     for ones in lroll[0]..6 {
-        for twos in lroll[1]..6 {
-            for threes in lroll[2]..6 {
-                for fours in lroll[3]..6 {
-                    for fives in lroll[4]..6 {
-                        for sixes in lroll[5]..6 {
-                            if ones+twos+threes+fours+fives+sixes == 5 {
-                                sum += *(end_states.get(&[ones,twos,threes,fours,fives,sixes]).expect("asdfy"));
-                                cnt += 1f64;
+        if ones+lroll[1]+lroll[2]+lroll[3]+lroll[4]+lroll[5] == 5 {
+            sum += *(end_states.get(&[ones,lroll[1],lroll[2],lroll[3],lroll[4],lroll[5]]).expect("asdfy"));
+            cnt += 1f64;
+            break;
+        }
+        else {
+            for twos in lroll[1]..6 {
+                if ones+twos+lroll[2]+lroll[3]+lroll[4]+lroll[5] == 5 {
+                    sum += *(end_states.get(&[ones,twos,lroll[2],lroll[3],lroll[4],lroll[5]]).expect("asdfy"));
+                    cnt += 1f64;
+                    break;
+                }
+                else {
+                    for threes in lroll[2]..6 {
+                        if ones+twos+threes+lroll[3]+lroll[4]+lroll[5] == 5 {
+                            sum += *(end_states.get(&[ones,twos,threes,lroll[3],lroll[4],lroll[5]]).expect("asdfy"));
+                            cnt += 1f64;
+                            break;
+                        }
+                        else {
+                            for fours in lroll[3]..6 {
+                                if ones+twos+threes+fours+lroll[4]+lroll[5] == 5 {
+                                    sum += *(end_states.get(&[ones,twos,threes,fours,lroll[4],lroll[5]]).expect("asdfy"));
+                                    cnt += 1f64;
+                                    break;
+                                }
+                                else {
+                                    for fives in lroll[4]..6 {
+                                        if ones+twos+threes+fours+fives+lroll[5] == 5 {
+                                            sum += *(end_states.get(&[ones,twos,threes,fours,fives,lroll[5]]).expect("asdfy"));
+                                            cnt += 1f64;
+                                            break;
+                                        }
+                                        else {
+                                            for sixes in lroll[5]..6 {
+                                                if ones+twos+threes+fours+fives+sixes == 5 {
+                                                    sum += *(end_states.get(&[ones,twos,threes,fours,fives,sixes]).expect("asdfy"));
+                                                    cnt += 1f64;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -401,30 +317,31 @@ fn gen_keep_prob(lroll: &[u8; 6], end_states: &BTreeMap<[u8; 6], f64>) -> f64 {
             }
         }
     }
-    (sum / cnt)
+    sum / cnt
 }
 
-fn gen_end_prob(state: &state::State, lroll: &[u8; 6], lookup: &BTreeMap<state::State, f64>) -> (f64, usize) {
+fn gen_end_prob(state: u32, lroll: &[u8; 6], lookup: &Vec<f64>) -> (f64, usize) {
     let mut max = 0f64;
     let mut choseni = 0;
-    for i in 0..13us {
-        if state.fields[i] == false {
-            let tmp;
-            let news = state::new_state(state, lroll, i);
-            match lookup.get(&news) {
-                Some(x) => {
-                    //println!("score: {} {}", score(lroll, i), *x);
-                    tmp = *x + score(lroll, i);
-                }
-                None => {
-                    println!("{:?} {:?}", state, news);
-                    panic!();
-                }
+    for i in 0..13 {
+        if ((state & (1 << (18-i))) >> (18-i)) == 0 {
+            let news = new_state(state, lroll, i);
+            let tmp = lookup[news as usize] + score(lroll, i);
+            if tmp > max {
+                max = tmp;
+                choseni = i;
             }
-            if tmp > max { max = tmp; choseni = i; }
         }
     }
     (max,choseni)
+}
+
+pub fn new_state(state: u32, roll: &[u8;6], cat: usize) -> u32 {
+    let mut tmp = state | (1 << (18 - cat));
+    let curr_upper = state & (0b11_1111);
+    let next_upper = cmp::min(63, curr_upper + upper_score(roll, cat) as u32);
+    tmp |= next_upper;
+    tmp
 }
 
 fn gen_roll_prob(lroll: &[u8; 6], prevroll: &[u8; 6], keep_states: &BTreeMap<[u8; 6], f64>) -> (f64, [u8; 6]) {
@@ -448,14 +365,18 @@ fn gen_roll_prob(lroll: &[u8; 6], prevroll: &[u8; 6], keep_states: &BTreeMap<[u8
     (max, maxroll)
 }
 
-fn score(roll: &[u8;6], cat: usize) -> f64 {
+pub fn score(roll: &[u8;6], cat: usize) -> f64 {
     match cat {
         0 ... 5 => {
             return (roll[cat] * ((cat as u8) + 1)) as f64;
         },
         6 => {
             if roll.iter().fold(false, |a, &b| a || (b >= 3)) {
-                return (0..6us).map(|i| roll[i] * ((i as u8)+1)).sum() as f64;
+                let mut tmp = 0;
+                for i in 0..6 {
+                    tmp += (roll[i] as usize) * (i + 1)
+                }
+                return tmp as f64;
             }
             else {
                 return 0f64;
@@ -463,7 +384,11 @@ fn score(roll: &[u8;6], cat: usize) -> f64 {
         }
         7 => {
             if roll.iter().fold(false, |a, &b| a || (b >= 4)) {
-                return (0..6us).map(|i| roll[i] * ((i as u8)+1)).sum() as f64;
+                let mut tmp = 0;
+                for i in 0..6 {
+                    tmp += (roll[i] as usize) * (i + 1)
+                }
+                return tmp as f64;
             }
             else {
                 return 0f64;
@@ -505,10 +430,50 @@ fn score(roll: &[u8;6], cat: usize) -> f64 {
             }
         }
         12 => {
-            return (0..6us).map(|i| roll[i] * ((i as u8)+1)).sum() as f64;
+            let mut tmp = 0;
+            for i in 0..6 {
+                tmp += (roll[i] as usize) * (i + 1)
+            }
+            return tmp as f64;
         }
         _ => {
             return 0f64;
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_state() {
+        assert!(new_state(0b011_1111_1111_1100_0000, &[5,0,0,0,0,0], 0) == 0b111_1111_1111_1100_0101);
+        assert!(new_state(0b011_1111_1111_1111_1111, &[5,0,0,0,0,0], 0) == 0b111_1111_1111_1111_1111);
+    }
+
+    #[test]
+    fn test_score() {
+        assert!(score(&[5,0,0,0,0,0], 0) == 5.0);
+        assert!(score(&[0,5,0,0,0,0], 0) == 0.0);
+        assert!(score(&[3,2,0,0,0,0], 6) == 7.0);
+        assert!(score(&[2,2,1,0,0,0], 6) == 0.0);
+        assert!(score(&[4,1,0,0,0,0], 7) == 6.0);
+        assert!(score(&[3,2,0,0,0,0], 7) == 0.0);
+        assert!(score(&[3,2,0,0,0,0], 8) == 25.0);
+        assert!(score(&[2,2,1,0,0,0], 8) == 0.0);
+        assert!(score(&[1,1,2,1,0,0], 9) == 30.0);
+        assert!(score(&[1,1,0,1,2,0], 9) == 0.0);
+        assert!(score(&[1,1,1,1,1,0], 10) == 40.0);
+        assert!(score(&[1,1,1,1,0,1], 10) == 0.0);
+        assert!(score(&[5,0,0,0,0,0], 11) == 50.0);
+        assert!(score(&[4,0,0,1,0,0], 11) == 0.0);
+        assert!(score(&[1,1,1,1,1,0], 12) == 15.0);
+    }
+
+    #[test]
+    fn test_upper_score() {
+        assert!(upper_score(&[0,0,5,0,0,0], 2) == 15);
+        assert!(upper_score(&[0,0,5,0,0,0], 7) == 0);
+    }
 }
