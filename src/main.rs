@@ -42,16 +42,13 @@ use std::cmp;
 
 fn generate_dice_rolls() -> Vec<[u8; 6]> {
     let mut rolls = vec![];
-    for ones in 0..6u8 {
-        for twos in 0..6u8 {
-            for threes in 0..6u8 {
-                for fours in 0..6u8 {
-                    for fives in 0..6u8 {
-                        for sixes in 0..6u8 {
-                            if (ones+twos+threes+fours+fives+sixes) == 5 {
-                                rolls.push([ones,twos,threes,fours,fives,sixes]);
-                            }
-                        }
+    for ones in 0..6 {
+        for twos in 0..(6-ones) {
+            for threes in 0..(6-(ones+twos)) {
+                for fours in 0..(6-(ones+twos+threes)) {
+                    for fives in 0..(6-(ones+twos+threes+fours)) {
+                        let sixes = 5 - (ones+twos+threes+fours+fives);
+                        rolls.push([ones,twos,threes,fours,fives,sixes]);
                     }
                 }
             }
@@ -62,15 +59,13 @@ fn generate_dice_rolls() -> Vec<[u8; 6]> {
 
 fn generate_dice_keeps() -> Vec<[u8; 6]> {
     let mut keeps = vec![];
-    for ones in 0..6u8 {
-        for twos in 0..6u8 {
-            for threes in 0..6u8 {
-                for fours in 0..6u8 {
-                    for fives in 0..6u8 {
-                        for sixes in 0..6u8 {
-                            if (ones+twos+threes+fours+fives+sixes) <= 5 {
-                                keeps.push([ones,twos,threes,fours,fives,sixes]);
-                            }
+    for ones in 0..6 {
+        for twos in 0..(6-ones) {
+            for threes in 0..(6-(ones+twos)) {
+                for fours in 0..(6-(ones+twos+threes)) {
+                    for fives in 0..(6-(ones+twos+threes+fours)) {
+                        for sixes in 0..(6-(ones+twos+threes+fours+fives)) {
+                            keeps.push([ones,twos,threes,fours,fives,sixes]);
                         }
                     }
                 }
@@ -326,7 +321,7 @@ fn gen_end_prob(state: u32, lroll: &[u8; 6], lookup: &Vec<f64>) -> (f64, usize) 
     for i in 0..13 {
         if ((state & (1 << (18-i))) >> (18-i)) == 0 {
             let news = new_state(state, lroll, i);
-            let tmp = lookup[news as usize] + score(lroll, i);
+            let tmp = lookup[news as usize] + score(lroll, i) as f64;
             if tmp > max {
                 max = tmp;
                 choseni = i;
@@ -365,79 +360,79 @@ fn gen_roll_prob(lroll: &[u8; 6], prevroll: &[u8; 6], keep_states: &BTreeMap<[u8
     (max, maxroll)
 }
 
-pub fn score(roll: &[u8;6], cat: usize) -> f64 {
+pub fn score(roll: &[u8;6], cat: usize) -> u32 {
     match cat {
         0 ... 5 => {
-            return (roll[cat] * ((cat as u8) + 1)) as f64;
+            return roll[cat] as u32 * ((cat as u32) + 1);
         },
         6 => {
             if roll.iter().fold(false, |a, &b| a || (b >= 3)) {
                 let mut tmp = 0;
                 for i in 0..6 {
-                    tmp += (roll[i] as usize) * (i + 1)
+                    tmp += (roll[i] as u32) * (i as u32 + 1)
                 }
-                return tmp as f64;
+                return tmp;
             }
             else {
-                return 0f64;
+                return 0;
             }
         }
         7 => {
             if roll.iter().fold(false, |a, &b| a || (b >= 4)) {
                 let mut tmp = 0;
                 for i in 0..6 {
-                    tmp += (roll[i] as usize) * (i + 1)
+                    tmp += (roll[i] as u32) * (i as u32 + 1)
                 }
-                return tmp as f64;
+                return tmp;
             }
             else {
-                return 0f64;
+                return 0;
             }
         }
         8 => {
             if roll.contains(&3) && roll.contains(&2) {
-                return 25f64;
+                return 25;
             }
             else {
-                return 0f64;
+                return 0;
             }
         }
         9 => {
             if    (roll[0] >= 1 && roll[1] >= 1 && roll[2] >= 1 && roll[3] >= 1)
                || (roll[1] >= 1 && roll[2] >= 1 && roll[3] >= 1 && roll[4] >= 1)
                || (roll[2] >= 1 && roll[3] >= 1 && roll[4] >= 1 && roll[5] >= 1) {
-                   return 30f64;
+                   return 30;
                }
             else {
-                return 0f64;
+                return 0;
             }
         }
         10 => {
             if    (roll[0] == 1 && roll[1] == 1 && roll[2] == 1 && roll[3] == 1 && roll[4] == 1)
                || (roll[1] == 1 && roll[2] == 1 && roll[3] == 1 && roll[4] == 1 && roll[5] == 1) {
-                   return 40f64;
+                   return 40;
                }
             else {
-                return 0f64;
+                return 0;
             }
         }
         11 => {
             if roll.contains(&5) {
-                return 50f64;
+                return 50;
             }
             else {
-                return 0f64;
+                return 0;
             }
         }
         12 => {
             let mut tmp = 0;
             for i in 0..6 {
-                tmp += (roll[i] as usize) * (i + 1)
+                tmp += (roll[i] as u32) * (i as u32 + 1)
             }
-            return tmp as f64;
+            return tmp;
         }
         _ => {
-            return 0f64;
+            return 0;
         }
     };
 }
@@ -454,21 +449,21 @@ mod tests {
 
     #[test]
     fn test_score() {
-        assert!(score(&[5,0,0,0,0,0], 0) == 5.0);
-        assert!(score(&[0,5,0,0,0,0], 0) == 0.0);
-        assert!(score(&[3,2,0,0,0,0], 6) == 7.0);
-        assert!(score(&[2,2,1,0,0,0], 6) == 0.0);
-        assert!(score(&[4,1,0,0,0,0], 7) == 6.0);
-        assert!(score(&[3,2,0,0,0,0], 7) == 0.0);
-        assert!(score(&[3,2,0,0,0,0], 8) == 25.0);
-        assert!(score(&[2,2,1,0,0,0], 8) == 0.0);
-        assert!(score(&[1,1,2,1,0,0], 9) == 30.0);
-        assert!(score(&[1,1,0,1,2,0], 9) == 0.0);
-        assert!(score(&[1,1,1,1,1,0], 10) == 40.0);
-        assert!(score(&[1,1,1,1,0,1], 10) == 0.0);
-        assert!(score(&[5,0,0,0,0,0], 11) == 50.0);
-        assert!(score(&[4,0,0,1,0,0], 11) == 0.0);
-        assert!(score(&[1,1,1,1,1,0], 12) == 15.0);
+        assert!(score(&[5,0,0,0,0,0], 0) == 5);
+        assert!(score(&[0,5,0,0,0,0], 0) == 0);
+        assert!(score(&[3,2,0,0,0,0], 6) == 7);
+        assert!(score(&[2,2,1,0,0,0], 6) == 0);
+        assert!(score(&[4,1,0,0,0,0], 7) == 6);
+        assert!(score(&[3,2,0,0,0,0], 7) == 0);
+        assert!(score(&[3,2,0,0,0,0], 8) == 25);
+        assert!(score(&[2,2,1,0,0,0], 8) == 0);
+        assert!(score(&[1,1,2,1,0,0], 9) == 30);
+        assert!(score(&[1,1,0,1,2,0], 9) == 0);
+        assert!(score(&[1,1,1,1,1,0], 10) == 40);
+        assert!(score(&[1,1,1,1,0,1], 10) == 0);
+        assert!(score(&[5,0,0,0,0,0], 11) == 50);
+        assert!(score(&[4,0,0,1,0,0], 11) == 0);
+        assert!(score(&[1,1,1,1,1,0], 12) == 15);
     }
 
     #[test]
