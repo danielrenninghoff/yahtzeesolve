@@ -4,4 +4,5 @@ version = "0.0.1"
 authors = ["Daniel Renninghoff <daniel.renninghoff@gmail.com>"]
 
 [dependencies]
-byteorder = "0.3"
+byteorder = "0.3.13"
+term = "0.2.11"
