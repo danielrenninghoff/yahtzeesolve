@@ -87,7 +87,7 @@ fn play() {
 fn calc_round(game: Game, lookup: &LookupTable, rollvec: &Vec<[u8; 6]>, dicekeeps: &Vec<[u8; 6]>) -> Game {
     let (keep_1_states, keep_2_states) = yahtzeesolve::precalc_current_round(game, lookup, rollvec, dicekeeps);
 
-    println!("New Round. Please enter your next roll:");
+    println!("Please roll your dice and enter:");
     let mut line = String::new();
     io::stdin().read_line(&mut line).unwrap();
     let input: u32 = line.trim().parse().unwrap();

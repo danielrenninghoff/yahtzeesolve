@@ -30,90 +30,66 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 pub fn upper_score(roll: &[u8;6], cat: u8) -> u8 {
     match cat {
-        0 ... 5 => {
-            return roll[cat as usize] * (cat + 1);
-        }
-        _ => {
-            return 0;
-        }
+        0 ... 5 => roll[cat as usize] * (cat + 1),
+        _ => 0
     }
 }
 
 pub fn score(roll: &[u8;6], cat: u8) -> u8 {
     match cat {
-        0 ... 5 => {
-            return roll[cat as usize] * (cat + 1);
-        },
+        0 ... 5 => roll[cat as usize] * (cat + 1),
         6 => {
             if roll.iter().fold(false, |a, &b| a || (b >= 3)) {
                 let mut tmp = 0;
                 for i in 0..6 {
                     tmp += roll[i] * ((i as u8) + 1)
                 }
-                return tmp;
+                tmp
             }
             else {
-                return 0;
+                0
             }
-        }
+        },
         7 => {
             if roll.iter().fold(false, |a, &b| a || (b >= 4)) {
                 let mut tmp = 0;
                 for i in 0..6 {
                     tmp += roll[i] * ((i as u8) + 1)
                 }
-                return tmp;
+                tmp
             }
             else {
-                return 0;
+                0
             }
-        }
-        8 => {
-            if roll.contains(&3) && roll.contains(&2) {
-                return 25;
-            }
-            else {
-                return 0;
-            }
-        }
+        },
+        8 => if roll.contains(&3) && roll.contains(&2) { 25 } else { 0 },
         9 => {
             if    (roll[0] >= 1 && roll[1] >= 1 && roll[2] >= 1 && roll[3] >= 1)
                || (roll[1] >= 1 && roll[2] >= 1 && roll[3] >= 1 && roll[4] >= 1)
                || (roll[2] >= 1 && roll[3] >= 1 && roll[4] >= 1 && roll[5] >= 1) {
-                   return 30;
+                   30
                }
             else {
-                return 0;
+                0
             }
-        }
+        },
         10 => {
-            if    (roll[0] == 1 && roll[1] == 1 && roll[2] == 1 && roll[3] == 1 && roll[4] == 1)
+            if (roll[0] == 1 && roll[1] == 1 && roll[2] == 1 && roll[3] == 1 && roll[4] == 1)
                || (roll[1] == 1 && roll[2] == 1 && roll[3] == 1 && roll[4] == 1 && roll[5] == 1) {
-                   return 40;
-               }
-            else {
-                return 0;
+                40
             }
-        }
-        11 => {
-            if roll.contains(&5) {
-                return 50;
-            }
-            else {
-                return 0;
-            }
-        }
+            else { 0 }
+        },
+        11 => if roll.contains(&5) { 50 } else { 0 },
         12 => {
             let mut tmp = 0;
             for i in 0..6 {
                 tmp += roll[i] * ((i as u8) + 1)
             }
-            return tmp;
-        }
-        _ => {
-            return 0;
-        }
-    };
+            tmp
+        },
+        _ => 0
+    }
 }
 
 #[cfg(test)]
