@@ -6,3 +6,5 @@ authors = ["Daniel Renninghoff <daniel.renninghoff@gmail.com>"]
 [dependencies]
 byteorder = "0.3.13"
 term = "0.2.11"
+gtk = "0.0.4"
+glib = "0.0.4"
