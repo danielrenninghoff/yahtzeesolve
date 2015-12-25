@@ -34,6 +34,30 @@
         <col id="0" translatable="yes">Sixes</col>
         <col id="1">0</col>
       </row>
+      <row>
+        <col id="0" translatable="yes">3 of a kind</col>
+        <col id="1">0</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">4 of a kind</col>
+        <col id="1">0</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">Full house</col>
+        <col id="1">0</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">Sm. straight</col>
+        <col id="1">0</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">Lg. straight</col>
+        <col id="1">0</col>
+      </row>
+      <row>
+        <col id="0" translatable="yes">YAHTZEE</col>
+        <col id="1">0</col>
+      </row>
     </data>
   </object>
   <object class="GtkApplicationWindow" id="applicationwindow1">
@@ -94,7 +118,10 @@
   </object>
   <object class="GtkDialog" id="dialog1">
     <property name="can_focus">False</property>
+    <property name="resizable">False</property>
+    <property name="modal">True</property>
     <property name="type_hint">dialog</property>
+    <property name="deletable">False</property>
     <property name="transient_for">applicationwindow1</property>
     <child internal-child="vbox">
       <object class="GtkBox" id="dialog-vbox1">
@@ -119,18 +146,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkButton" id="button1">
-                <property name="label" translatable="yes">Ok</property>
-                <property name="visible">True</property>
-                <property name="can_focus">True</property>
-                <property name="receives_default">True</property>
-                <property name="yalign">0.52999997138977051</property>
-              </object>
-              <packing>
-                <property name="expand">True</property>
-                <property name="fill">True</property>
-                <property name="position">1</property>
-              </packing>
+              <placeholder/>
             </child>
           </object>
           <packing>

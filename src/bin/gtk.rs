@@ -48,46 +48,57 @@ fn main() {
 
     let glade_src = include_str!("gui.glade");
     let builder = gtk::widgets::Builder::new_from_string(glade_src).unwrap();
-    let window: gtk::Window = builder.get_object("applicationwindow1").unwrap();
 
-    window.connect_delete_event(|_, _| {
-        gtk::main_quit();
-        Inhibit(true)
-    });
-    window.show_all();
-
-    let lookup = LookupTable::from_file("probs.dat").unwrap_or_else(|_| {
-        let dialog: gtk::Dialog = builder.get_object("dialog1").unwrap();
-        let progressbar: gtk::ProgressBar = builder.get_object("progressbar1").unwrap();
-        GLOBAL.with(move |global| {
-            *global.borrow_mut() = Some((progressbar, 0.0))
+    unsafe {
+        let window: gtk::Window = builder.get_object("applicationwindow1").unwrap();
+        let cancel_button: gtk::Button = builder.get_object("button2").unwrap();
+        cancel_button.connect_clicked(|_| {
+            println!("asd");
+            gtk::main_quit();
         });
 
-        let t = thread::spawn(move || {
-            let (tx, rx) = mpsc::channel();
-            let t2 = LookupTable::generate(tx);
-            for _ in 0..100 {
-                rx.recv().unwrap();
-                println!("test");
-                glib::idle_add(|| {
-                    GLOBAL.with(|global| {
-                        if let Some((ref pb, mut progr)) = *global.borrow() {
-                            println!("test2");
-                            progr += 0.01;
-                            pb.set_fraction(progr);
-                        }
+        window.connect_delete_event(|_, _| {
+            gtk::main_quit();
+            Inhibit(true)
+        });
+        window.show_all();
+
+        let lookup = LookupTable::from_file("probs.dat").unwrap_or_else(|_| {
+            let dialog: gtk::Dialog = builder.get_object("dialog1").unwrap();
+            let progressbar: gtk::ProgressBar = builder.get_object("progressbar1").unwrap();
+            GLOBAL.with(move |global| {
+                *global.borrow_mut() = Some((progressbar, 0.0))
+            });
+
+            let t = thread::spawn(move || {
+                let (tx, rx) = mpsc::channel();
+                let t2 = LookupTable::generate(tx);
+                for _ in 0..100 {
+                    rx.recv().unwrap();
+                    glib::idle_add(|| {
+                        GLOBAL.with(|global| {
+                            let mut asd = global.borrow_mut();
+                            match *asd {
+                                Some((ref pb, ref mut progr)) => {
+                                    *progr += 0.01;
+                                    pb.set_fraction(*progr);
+                                },
+                                None => {}
+                            }
+                        });
+                        glib::Continue(false)
                     });
-                    glib::Continue(false)
-                });
-            }
-            t2.join().unwrap()
-        });
+                }
+                t2.join().unwrap()
+            });
 
-        gtk::Dialog::run(&dialog);
-        let lookup2 = t.join().unwrap();
-        lookup2.write_to_file("probs.dat").unwrap();
-        lookup2
-    });
+            gtk::Dialog::run(&dialog);
+            let lookup2 = t.join().unwrap();
+            dialog.destroy();
+            lookup2.write_to_file("probs.dat").unwrap();
+            lookup2
+        });
+    }
 
     gtk::main();
 }
