@@ -38,9 +38,16 @@ use gtk::signal::Inhibit;
 use std::sync::mpsc;
 use std::thread;
 use yahtzeesolve::LookupTable;
+use yahtzeesolve::game::generators;
+use yahtzeesolve::game::rules;
+use yahtzeesolve::game::Game;
 
 thread_local!(
     static GLOBAL: RefCell<Option<(gtk::ProgressBar, f64)>> = RefCell::new(None)
+);
+
+thread_local!(
+    static STATE: RefCell<Option<(Game, u8)>> = RefCell::new(None)
 );
 
 fn main() {
@@ -52,6 +59,7 @@ fn main() {
     unsafe {
         let window: gtk::Window = builder.get_object("applicationwindow1").unwrap();
         let cancel_button: gtk::Button = builder.get_object("button2").unwrap();
+        let calc_button: gtk::Button = builder.get_object("button3").unwrap();
         cancel_button.connect_clicked(|_| {
             println!("asd");
             gtk::main_quit();
@@ -62,6 +70,10 @@ fn main() {
             Inhibit(true)
         });
         window.show_all();
+
+        STATE.with(move |state| {
+            *state.borrow_mut() = Some((Game::new(), 0))
+        });
 
         let lookup = LookupTable::from_file("probs.dat").unwrap_or_else(|_| {
             let dialog: gtk::Dialog = builder.get_object("dialog1").unwrap();
@@ -98,7 +110,25 @@ fn main() {
             lookup2.write_to_file("probs.dat").unwrap();
             lookup2
         });
+        let rollvec = generators::generate_dice_roll_possibilities();
+        let dicekeeps = generators::generate_dice_keep_possibilities();
+
+        calc_button.connect_clicked(move |_| {
+            STATE.with(|state| {
+                let mut asd = state.borrow_mut();
+                match *asd {
+                    None => {},
+                    Some((ref mut state, ref mut cnt)) => {
+                        calc_round(state, cnt, &rollvec, &dicekeeps, &lookup);
+                    }
+                }
+            });
+        });
     }
 
     gtk::main();
+}
+
+fn calc_round(game: &mut Game, cnt: &mut u8, rollvec: &Vec<[u8; 6]>, dicekeeps: &Vec<[u8; 6]>, lookup: &LookupTable) {
+    let (keep_1_states, keep_2_states) = yahtzeesolve::precalc_current_round(*game, lookup, rollvec, dicekeeps);
 }

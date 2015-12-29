@@ -39,7 +39,10 @@ use std::path::Path;
 use std::thread;
 use std::thread::JoinHandle;
 use std::sync::mpsc::Sender;
+use std::sync::mpsc;
+use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct LookupTable(pub Vec<f64>);
 
 impl LookupTable {
@@ -56,18 +59,33 @@ impl LookupTable {
     pub fn generate(tx: Sender<()>) -> JoinHandle<LookupTable> {
         thread::spawn(move || {
             let mut lookup = LookupTable(vec![0f64; 524288]);
-            let rollvec = generators::generate_dice_roll_possibilities();
-            let dicekeeps = generators::generate_dice_keep_possibilities();
-            let mut progress = 524288;
-            for i in (0..524288).rev() {
-                if (progress - i) >= 5242 {
+            let rollvec = Arc::new(generators::generate_dice_roll_possibilities());
+            let dicekeeps = Arc::new(generators::generate_dice_keep_possibilities());
+            let mut progress = 8192;
+            for i in (0..8192).rev() {
+                if (progress-i) >= 81 {
                     progress = i;
                     tx.send(()).unwrap();
                 }
-                let tmp = generators::gen_start_prob(Game(i), &lookup, &rollvec, &dicekeeps);
-                lookup.set(i, tmp);
+                let (tx2, rx2) = mpsc::channel();
+                for j in 0..4 {
+                    let lookup = lookup.clone();
+                    let tx2 = tx2.clone();
+                    let rollvec = rollvec.clone();
+                    let dicekeeps = dicekeeps.clone();
+                    thread::spawn(move || {
+                        for k in ((i*64+(j*16))..(i*64+((j+1)*16))).rev() {
+                            let tmp = generators::gen_start_prob(Game(j), &lookup, &rollvec, &dicekeeps);
+                            tx2.send((k, tmp)).unwrap();
+                        }
+                    });
+                }
+                for _ in 0..64 {
+                    let (num, val) = rx2.recv().unwrap();
+                    lookup.set(num, val);
+                }
             }
-            lookup
+            lookup.clone()
         })
     }
 
