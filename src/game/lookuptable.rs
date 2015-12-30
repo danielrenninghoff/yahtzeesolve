@@ -27,6 +27,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+extern crate num_cpus;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use game::generators;
@@ -61,6 +62,7 @@ impl LookupTable {
             let mut lookup = LookupTable(vec![0f64; 524288]);
             let rollvec = Arc::new(generators::generate_dice_roll_possibilities());
             let dicekeeps = Arc::new(generators::generate_dice_keep_possibilities());
+            let num_threads = num_cpus::get() as u32;
             let mut progress = 8192;
             for i in (0..8192).rev() {
                 if (progress-i) >= 81 {
@@ -68,13 +70,14 @@ impl LookupTable {
                     tx.send(()).unwrap();
                 }
                 let (tx2, rx2) = mpsc::channel();
-                for j in 0..4 {
+
+                for j in 0..num_threads {
                     let lookup = lookup.clone();
                     let tx2 = tx2.clone();
                     let rollvec = rollvec.clone();
                     let dicekeeps = dicekeeps.clone();
                     thread::spawn(move || {
-                        for k in ((i*64+(j*16))..(i*64+((j+1)*16))).rev() {
+                        for k in ((i*64+(j*(64/num_threads)))..(i*64+((j+1)*(64/num_threads)))).rev() {
                             let tmp = generators::gen_start_prob(Game(j), &lookup, &rollvec, &dicekeeps);
                             tx2.send((k, tmp)).unwrap();
                         }
@@ -85,7 +88,7 @@ impl LookupTable {
                     lookup.set(num, val);
                 }
             }
-            lookup.clone()
+            lookup
         })
     }
 

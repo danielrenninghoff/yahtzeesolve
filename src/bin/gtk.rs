@@ -47,7 +47,11 @@ thread_local!(
 );
 
 thread_local!(
-    static STATE: RefCell<Option<(Game, u8)>> = RefCell::new(None)
+    static GLOBAL2: RefCell<Option<(gtk::Entry, gtk::Label, gtk::ListStore)>> = RefCell::new(None)
+);
+
+thread_local!(
+    static STATE: RefCell<Option<(Game, u8, [u8; 6])>> = RefCell::new(None)
 );
 
 fn main() {
@@ -59,7 +63,7 @@ fn main() {
     unsafe {
         let window: gtk::Window = builder.get_object("applicationwindow1").unwrap();
         let cancel_button: gtk::Button = builder.get_object("button2").unwrap();
-        let calc_button: gtk::Button = builder.get_object("button3").unwrap();
+        let calc_button: gtk::Button = builder.get_object("button1").unwrap();
         cancel_button.connect_clicked(|_| {
             println!("asd");
             gtk::main_quit();
@@ -72,7 +76,23 @@ fn main() {
         window.show_all();
 
         STATE.with(move |state| {
-            *state.borrow_mut() = Some((Game::new(), 0))
+            *state.borrow_mut() = Some((Game::new(), 0, [0,0,0,0,0,0]))
+        });
+
+        let entry1: gtk::Entry = builder.get_object("entry1").unwrap();
+        let label3: gtk::Label  = builder.get_object("label3").unwrap();
+        let treeview1: gtk::TreeView  = builder.get_object("treeview1").unwrap();
+        let liststore = gtk::ListStore::new(&[glib::Type::String, glib::Type::U32]).unwrap();
+        let listmodel = liststore.get_model().unwrap();
+        treeview1.set_model(&listmodel);
+
+        for st in vec!["Aces", "Twos", "Threes", "Fours", "Fives", "Sixes", "3 of a kind", "4 of a kind", "Full house", "Sm. straight", "Lg. straight", "YAHTZEE", "Chance"] {
+            let iter = liststore.append();
+            liststore.set_string(&iter, 0, st);
+        }
+
+        GLOBAL2.with(|global| {
+            *global.borrow_mut() = Some((entry1, label3, liststore))
         });
 
         let lookup = LookupTable::from_file("probs.dat").unwrap_or_else(|_| {
@@ -118,8 +138,12 @@ fn main() {
                 let mut asd = state.borrow_mut();
                 match *asd {
                     None => {},
-                    Some((ref mut state, ref mut cnt)) => {
-                        calc_round(state, cnt, &rollvec, &dicekeeps, &lookup);
+                    Some((ref mut state, ref mut cnt, ref mut already_rolled)) => {
+                        GLOBAL2.with(|global| {
+                            if let Some((ref entry, ref label, ref liststore)) = *global.borrow() {
+                                calc_round(state, cnt, already_rolled, &rollvec, &dicekeeps, &lookup, entry, label, liststore);
+                            }
+                        })
                     }
                 }
             });
@@ -129,6 +153,144 @@ fn main() {
     gtk::main();
 }
 
-fn calc_round(game: &mut Game, cnt: &mut u8, rollvec: &Vec<[u8; 6]>, dicekeeps: &Vec<[u8; 6]>, lookup: &LookupTable) {
+fn calc_round(game: &mut Game, cnt: &mut u8, already_rolled: &mut [u8; 6], rollvec: &Vec<[u8; 6]>, dicekeeps: &Vec<[u8; 6]>, lookup: &LookupTable, entry: &gtk::Entry, label: &gtk::Label, liststore: &gtk::ListStore) {
+    // todo: save this between states
     let (keep_1_states, keep_2_states) = yahtzeesolve::precalc_current_round(*game, lookup, rollvec, dicekeeps);
+
+    let newroll = entry.get_text().unwrap();
+    let input: u32 = newroll.parse().unwrap();
+    let inp = key_conv(input);
+
+    match *cnt {
+        0 => {
+            let (_,kroll) = generators::gen_roll_prob(&inp, already_rolled, &keep_1_states);
+            let mut keepstr = format!("Keep ");
+            let mut beginning = true;
+            for i in 0..6 {
+                already_rolled[i] = kroll[i];
+                if kroll[i] != 0 {
+                    if beginning {
+                        beginning = false;
+                    }
+                    else {
+                        keepstr = keepstr + ", ";
+                    }
+                    keepstr = keepstr + &format!("{} x {}", kroll[i], i + 1);
+                }
+            }
+            if already_rolled.iter().fold(0, |a, &b| a + b) == 5 {
+                let (_,choseni) = generators::choose_best_field(*game, already_rolled, lookup);
+                let scr = rules::score(already_rolled, choseni);
+                *game = game.next_turn(already_rolled, choseni);
+                *cnt = 0;
+                let path = gtk::TreePath::new_from_indicesv(&mut [choseni as i32]).unwrap();
+                let treemodel: gtk::TreeModel = liststore.get_model().unwrap();
+                let iter = treemodel.get_iter(&path).unwrap();
+                unsafe {
+                    let mut val = glib::Value::new();
+                    val.init(glib::Type::U32);
+                    val.set_uint(scr as u32);
+                    liststore.set_value(&iter, 1, &val);
+                }
+                *already_rolled = [0,0,0,0,0,0];
+                let fieldlabels = vec!["Aces", "Twos", "Threes", "Fours", "Fives", "Sixes", "3 of a kind", "4 of a kind", "Full house", "Sm. straight", "Lg. straight", "YAHTZEE", "Chance"];
+                let textlabel = format!("Put {} in the {} field. Roll.", scr, fieldlabels[choseni as usize]);
+                label.set_text(&textlabel);
+                entry.set_text("");
+                return;
+            }
+
+            if beginning {
+                keepstr = "Roll again.".to_string();
+            }
+            else {
+                keepstr = keepstr + ". Roll again.";
+            }
+            label.set_text(&keepstr);
+            *cnt += 1;
+        },
+        1 => {
+            let (_,kroll) = generators::gen_roll_prob(&inp, already_rolled, &keep_2_states);
+            let mut keepstr = format!("Keep ");
+            let mut beginning = true;
+            for i in 0..6 {
+                if kroll[i] != 0 && kroll[i] != already_rolled[i] {
+                    if beginning {
+                        beginning = false;
+                    }
+                    else {
+                        keepstr = keepstr + ", ";
+                    }
+                    keepstr = keepstr + &format!("{} x {}", kroll[i] - already_rolled[i], i + 1);
+                }
+                already_rolled[i] = kroll[i];
+            }
+            if already_rolled.iter().fold(0, |a, &b| a + b) == 5 {
+                let (_,choseni) = generators::choose_best_field(*game, already_rolled, lookup);
+                let scr = rules::score(already_rolled, choseni);
+                *game = game.next_turn(already_rolled, choseni);
+                *cnt = 0;
+                let path = gtk::TreePath::new_from_indicesv(&mut [choseni as i32]).unwrap();
+                let treemodel: gtk::TreeModel = liststore.get_model().unwrap();
+                let iter = treemodel.get_iter(&path).unwrap();
+                unsafe {
+                    let mut val = glib::Value::new();
+                    val.init(glib::Type::U32);
+                    val.set_uint(scr as u32);
+                    liststore.set_value(&iter, 1, &val);
+                }
+                *already_rolled = [0,0,0,0,0,0];
+                let fieldlabels = vec!["Aces", "Twos", "Threes", "Fours", "Fives", "Sixes", "3 of a kind", "4 of a kind", "Full house", "Sm. straight", "Lg. straight", "YAHTZEE", "Chance"];
+                let textlabel = format!("Put {} in the {} field. Roll.", scr, fieldlabels[choseni as usize]);
+                label.set_text(&textlabel);
+            }
+
+            if beginning {
+                keepstr = "Roll again.".to_string();
+            }
+            else {
+                keepstr = keepstr + ". Roll again.";
+            }
+            label.set_text(&keepstr);
+
+            *cnt += 1;
+        },
+        2 => {
+            for i in 0..6 {
+                already_rolled[i] += inp[i];
+            }
+            let (_,choseni) = generators::choose_best_field(*game, already_rolled, lookup);
+            let scr = rules::score(already_rolled, choseni);
+            *game = game.next_turn(already_rolled, choseni);
+            *cnt = 0;
+            let path = gtk::TreePath::new_from_indicesv(&mut [choseni as i32]).unwrap();
+            let treemodel: gtk::TreeModel = liststore.get_model().unwrap();
+            let iter = treemodel.get_iter(&path).unwrap();
+            unsafe {
+                let mut val = glib::Value::new();
+                val.init(glib::Type::U32);
+                val.set_uint(scr as u32);
+                liststore.set_value(&iter, 1, &val);
+            }
+            *already_rolled = [0,0,0,0,0,0];
+            let fieldlabels = vec!["Aces", "Twos", "Threes", "Fours", "Fives", "Sixes", "3 of a kind", "4 of a kind", "Full house", "Sm. straight", "Lg. straight", "YAHTZEE", "Chance"];
+            let textlabel = format!("Put {} in the {} field. Roll.", scr, fieldlabels[choseni as usize]);
+            label.set_text(&textlabel);
+        },
+        _ => {}
+    }
+    entry.set_text("");
+}
+
+fn key_conv(input: u32) -> [u8;6] {
+    let mut tmp = input;
+    let mut out = [0u8; 6];
+    while tmp != 0 {
+        let tmp2 = (tmp % 10) as usize;
+        if tmp2 > 0 && tmp2 <= 6 {
+            out[tmp2 - 1] += 1;
+        }
+        tmp /= 10;
+    }
+    out
 }
